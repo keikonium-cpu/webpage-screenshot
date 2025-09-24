@@ -95,14 +95,14 @@ export default async function handler(req, res) {
     // Capture 5 viewport heights (1280x3600)
     const screenshotBuffer = await page.screenshot({
       clip: { x: 0, y: 0, width: 1280, height: 3600 },
-      type: 'jpeg',
+      type: 'webp', // Switch to WebP for smaller size
       quality: 80,
     });
 
     // Upload to Cloudinary
     const uploadResult = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
-        { resource_type: 'image', folder: 'screenshots', format: 'jpg', quality: 80 },
+        { resource_type: 'image', folder: 'screenshots', format: 'webp', quality: 80 },
         (error, result) => {
           if (error) reject(error);
           else resolve(result);
@@ -114,7 +114,7 @@ export default async function handler(req, res) {
     await browser.close();
 
     return res.status(200).json({
-      message: 'Screenshot captured and uploaded (5 viewport heights)',
+      message: 'Screenshot captured and uploaded (5 viewport heights, WebP)',
       url: uploadResult.secure_url,
       timestamp: new Date().toISOString(),
       pageHeight: pageHeight,
