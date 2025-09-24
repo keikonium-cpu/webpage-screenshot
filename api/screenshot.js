@@ -45,34 +45,50 @@ export default async function handler(req, res) {
 
     browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 720 }); // Reasonable size for speeds
+    await page.setViewport({ width: 1280, height: 720 }); // Reasonable size for speed
 
-    // Navigate with user-agent to avoid bot detection
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0.0.0');
+    // Mimic real browser to avoid bot detection
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36');
+
     const url = process.env.TARGET_URL;
 
-    // Navigate with shorter timeout
+    // Navigate and wait for network to settle
     await page.goto(url, {
-      waitUntil: 'domcontentloaded', // Faster load
-      timeout: 5000,
+      waitUntil: 'networkidle0', // Wait for all network requests to complete
+      timeout: 6000, // 6s max to fit Vercel 10s limit
     });
+
+    // Brief delay to stabilize dynamic content
+    await page.waitForTimeout(1000); // 1s for JS rendering
+
+    // Calculate true page height to ensure correct capture
+    const pageHeight = await page.evaluate(() => {
+      return Math.max(
+        document.body.scrollHeight,
+        document.documentElement.scrollHeight,
+        document.body.offsetHeight,
+        document.documentElement.offsetHeight,
+        document.documentElement.clientHeight
+      );
+    });
+    console.log(`Page height: ${pageHeight}px`);
 
     // Capture full-page screenshot as buffer
     const screenshotBuffer = await page.screenshot({ 
-      fullPage: true, // Captures entire page, including scrolled content
+      fullPage: true, // Captures entire page
       encoding: 'binary',
-      type: 'jpeg', // JPEG for smaller size vs PNG
-      quality: 80, // 80% quality to reduce file size (0-100)
+      type: 'jpeg', // Smaller size
+      quality: 80, // Balance size vs quality
     });
 
-    // Upload buffer to Cloudinary with compression
+    // Upload buffer to Cloudinary
     const uploadResult = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         { 
           resource_type: 'image', 
           folder: 'screenshots',
-          format: 'jpg', // Ensure Cloudinary saves as JPEG
-          quality: 80, // Match screenshot quality
+          format: 'jpg',
+          quality: 80,
         },
         (error, result) => {
           if (error) reject(error);
@@ -88,6 +104,7 @@ export default async function handler(req, res) {
       message: 'Full-page screenshot captured and uploaded',
       url: uploadResult.secure_url,
       timestamp: new Date().toISOString(),
+      pageHeight: pageHeight, // Debug info
     });
   } catch (error) {
     console.error('Screenshot error:', error.message, error.stack);
