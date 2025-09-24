@@ -1,4 +1,5 @@
 import { v2 as cloudinary } from 'cloudinary';
+import sharp from 'sharp';
 
 // Cloudinary config (from env vars)
 cloudinary.config({
@@ -45,66 +46,104 @@ export default async function handler(req, res) {
 
     browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 720 }); // Reasonable size for speed
+    const viewport = { width: 1280, height: 720 };
+    await page.setViewport(viewport);
 
-    // Mimic real browser to avoid bot detection
+    // Mimic real browser
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36');
 
     const url = process.env.TARGET_URL;
 
-    // Navigate and wait for network to settle
+    // Navigate with adjusted timeout and wait
     await page.goto(url, {
-      waitUntil: 'networkidle0', // Wait for all network requests to complete
-      timeout: 6000, // 6s max to fit Vercel 10s limit
+      waitUntil: 'load', // Faster for initial content
+      timeout: 10000, // 10s to handle eBay's load
     });
 
-    // Brief delay to stabilize dynamic content
-    await page.waitForTimeout(1000); // 1s for JS rendering
-
-    // Calculate true page height to ensure correct capture
-    const pageHeight = await page.evaluate(() => {
-      return Math.max(
-        document.body.scrollHeight,
-        document.documentElement.scrollHeight,
-        document.body.offsetHeight,
-        document.documentElement.offsetHeight,
-        document.documentElement.clientHeight
-      );
-    });
-    console.log(`Page height: ${pageHeight}px`);
-
-    // Capture full-page screenshot as buffer
-    const screenshotBuffer = await page.screenshot({ 
-      fullPage: true, // Captures entire page
-      encoding: 'binary',
-      type: 'jpeg', // Smaller size
-      quality: 80, // Balance size vs quality
+    // Scroll to load lazy images
+    await page.evaluate(async () => {
+      await new Promise((resolve) => {
+        let totalHeight = 0;
+        const distance = 200; // Larger steps for speed
+        const timer = setInterval(() => {
+          const scrollHeight = document.body.scrollHeight;
+          window.scrollBy(0, distance);
+          totalHeight += distance;
+          if (totalHeight >= scrollHeight - window.innerHeight) {
+            clearInterval(timer);
+            resolve();
+          }
+        }, 100);
+      });
     });
 
-    // Upload buffer to Cloudinary
+    // Brief delay for stabilization
+    await page.waitForTimeout(500);
+
+    // Calculate true page height
+    const pageHeight = await page.evaluate(() => Math.max(
+      document.body.scrollHeight,
+      document.documentElement.scrollHeight,
+      document.body.offsetHeight,
+      document.documentElement.offsetHeight,
+      document.documentElement.clientHeight
+    ));
+    console.log(`Calculated page height: ${pageHeight}px`);
+
+    // Reset scroll to top
+    await page.evaluate(() => window.scrollTo(0, 0));
+
+    // Capture in sections to avoid duplication
+    const sections = [];
+    const numSections = Math.ceil(pageHeight / viewport.height);
+    let totalHeightCaptured = 0;
+
+    for (let i = 0; i < numSections; i++) {
+      await page.evaluate((y) => window.scrollTo(0, y), totalHeightCaptured);
+      await page.waitForTimeout(200); // Stabilize
+
+      const sectionHeight = (i === numSections - 1) ? (pageHeight % viewport.height) || viewport.height : viewport.height;
+      const buffer = await page.screenshot({
+        clip: { x: 0, y: 0, width: viewport.width, height: sectionHeight },
+        type: 'jpeg',
+        quality: 80,
+      });
+      sections.push({ buffer, height: sectionHeight });
+      totalHeightCaptured += sectionHeight;
+    }
+
+    // Stitch sections with sharp
+    let compositeHeight = sections.reduce((sum, sec) => sum + sec.height, 0);
+    let sharpImage = sharp({
+      create: { width: viewport.width, height: compositeHeight, channels: 3, background: { r: 255, g: 255, b: 255 } }
+    });
+    let offset = 0;
+    const composites = sections.map((sec) => {
+      const comp = { input: sec.buffer, top: offset, left: 0 };
+      offset += sec.height;
+      return comp;
+    });
+    const compositeBuffer = await sharpImage.composite(composites).jpeg({ quality: 80 }).toBuffer();
+
+    // Upload to Cloudinary
     const uploadResult = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
-        { 
-          resource_type: 'image', 
-          folder: 'screenshots',
-          format: 'jpg',
-          quality: 80,
-        },
+        { resource_type: 'image', folder: 'screenshots', format: 'jpg', quality: 80 },
         (error, result) => {
           if (error) reject(error);
           else resolve(result);
         }
       );
-      uploadStream.end(screenshotBuffer);
+      uploadStream.end(compositeBuffer);
     });
 
     await browser.close();
 
     return res.status(200).json({
-      message: 'Full-page screenshot captured and uploaded',
+      message: 'Full-page screenshot captured and uploaded (with lazy-load and no duplication)',
       url: uploadResult.secure_url,
       timestamp: new Date().toISOString(),
-      pageHeight: pageHeight, // Debug info
+      pageHeight: pageHeight,
     });
   } catch (error) {
     console.error('Screenshot error:', error.message, error.stack);
