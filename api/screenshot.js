@@ -77,8 +77,8 @@ export default async function handler(req, res) {
       });
     });
 
-    // Brief delay for stabilization
-    await page.waitForTimeout(500);
+    // Brief delay for stabilization (using waitFor instead of waitForTimeout)
+    await page.waitFor(500);
 
     // Calculate true page height
     const pageHeight = await page.evaluate(() => Math.max(
@@ -100,7 +100,7 @@ export default async function handler(req, res) {
 
     for (let i = 0; i < numSections; i++) {
       await page.evaluate((y) => window.scrollTo(0, y), totalHeightCaptured);
-      await page.waitForTimeout(200); // Stabilize
+      await page.waitFor(200); // Stabilize
 
       const sectionHeight = (i === numSections - 1) ? (pageHeight % viewport.height) || viewport.height : viewport.height;
       const buffer = await page.screenshot({
