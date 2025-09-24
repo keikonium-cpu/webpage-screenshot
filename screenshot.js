@@ -5,7 +5,7 @@ const path = require('path');
 async function captureScreenshot() {
   const browser = await puppeteer.launch({ headless: true });
   const page = await browser.newPage();
-  const url = 'https://example.com'; // Replace with your target webpage
+  const url = 'https://www.ebay.com/sch/i.html?_nkw=alkaline+trio&LH_Complete=1'; // Replace with your target webpage
   const outputDir = './screenshots'; // Directory to save screenshots
 
   // Create output directory if it doesn't exist
