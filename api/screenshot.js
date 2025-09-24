@@ -1,5 +1,4 @@
 import { v2 as cloudinary } from 'cloudinary';
-import sharp from 'sharp';
 
 // Cloudinary config (from env vars)
 cloudinary.config({
@@ -54,22 +53,22 @@ export default async function handler(req, res) {
 
     const url = process.env.TARGET_URL;
 
-    // Navigate with adjusted timeout and wait
+    // Navigate with adjusted timeout
     await page.goto(url, {
       waitUntil: 'load', // Faster for initial content
       timeout: 10000, // 10s to handle eBay's load
     });
 
-    // Scroll to load lazy images
+    // Scroll to load lazy images (up to 5 viewports = 3600px)
     await page.evaluate(async () => {
       await new Promise((resolve) => {
         let totalHeight = 0;
-        const distance = 200; // Larger steps for speed
+        const distance = 200;
+        const maxHeight = 3600; // 5 * 720px
         const timer = setInterval(() => {
-          const scrollHeight = document.body.scrollHeight;
           window.scrollBy(0, distance);
           totalHeight += distance;
-          if (totalHeight >= scrollHeight - window.innerHeight) {
+          if (totalHeight >= maxHeight) {
             clearInterval(timer);
             resolve();
           }
@@ -77,10 +76,10 @@ export default async function handler(req, res) {
       });
     });
 
-    // Brief delay for stabilization (using waitFor instead of waitForTimeout)
-    await page.waitFor(500);
+    // Delay for stabilization (using setTimeout)
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
-    // Calculate true page height
+    // Calculate page height for logging (not used for capture)
     const pageHeight = await page.evaluate(() => Math.max(
       document.body.scrollHeight,
       document.documentElement.scrollHeight,
@@ -93,37 +92,12 @@ export default async function handler(req, res) {
     // Reset scroll to top
     await page.evaluate(() => window.scrollTo(0, 0));
 
-    // Capture in sections to avoid duplication
-    const sections = [];
-    const numSections = Math.ceil(pageHeight / viewport.height);
-    let totalHeightCaptured = 0;
-
-    for (let i = 0; i < numSections; i++) {
-      await page.evaluate((y) => window.scrollTo(0, y), totalHeightCaptured);
-      await page.waitFor(200); // Stabilize
-
-      const sectionHeight = (i === numSections - 1) ? (pageHeight % viewport.height) || viewport.height : viewport.height;
-      const buffer = await page.screenshot({
-        clip: { x: 0, y: 0, width: viewport.width, height: sectionHeight },
-        type: 'jpeg',
-        quality: 80,
-      });
-      sections.push({ buffer, height: sectionHeight });
-      totalHeightCaptured += sectionHeight;
-    }
-
-    // Stitch sections with sharp
-    let compositeHeight = sections.reduce((sum, sec) => sum + sec.height, 0);
-    let sharpImage = sharp({
-      create: { width: viewport.width, height: compositeHeight, channels: 3, background: { r: 255, g: 255, b: 255 } }
+    // Capture 5 viewport heights (1280x3600)
+    const screenshotBuffer = await page.screenshot({
+      clip: { x: 0, y: 0, width: 1280, height: 3600 },
+      type: 'jpeg',
+      quality: 80,
     });
-    let offset = 0;
-    const composites = sections.map((sec) => {
-      const comp = { input: sec.buffer, top: offset, left: 0 };
-      offset += sec.height;
-      return comp;
-    });
-    const compositeBuffer = await sharpImage.composite(composites).jpeg({ quality: 80 }).toBuffer();
 
     // Upload to Cloudinary
     const uploadResult = await new Promise((resolve, reject) => {
@@ -134,13 +108,13 @@ export default async function handler(req, res) {
           else resolve(result);
         }
       );
-      uploadStream.end(compositeBuffer);
+      uploadStream.end(screenshotBuffer);
     });
 
     await browser.close();
 
     return res.status(200).json({
-      message: 'Full-page screenshot captured and uploaded (with lazy-load and no duplication)',
+      message: 'Screenshot captured and uploaded (5 viewport heights)',
       url: uploadResult.secure_url,
       timestamp: new Date().toISOString(),
       pageHeight: pageHeight,

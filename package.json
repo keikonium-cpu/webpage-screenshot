@@ -8,8 +8,7 @@
   "dependencies": {
     "puppeteer-core": "^23.5.3",
     "@sparticuz/chromium": "^131.0.0",
-    "cloudinary": "^2.5.0",
-    "sharp": "^0.33.5"
+    "cloudinary": "^2.5.0"
   },
   "devDependencies": {
     "puppeteer": "^23.5.3"
