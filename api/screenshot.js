@@ -45,7 +45,10 @@ export default async function handler(req, res) {
 
     browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
-    await page.setViewport({ width: 1600, height: 3200 }); // Smaller for speed
+    await page.setViewport({ width: 1280, height: 720 }); // Reasonable size for speed
+
+    // Navigate with user-agent to avoid bot detection
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0.0.0');
     const url = process.env.TARGET_URL;
 
     // Navigate with shorter timeout
@@ -54,13 +57,23 @@ export default async function handler(req, res) {
       timeout: 5000,
     });
 
-    // Capture screenshot as buffer (avoids temp files in serverless)
-    const screenshotBuffer = await page.screenshot({ fullPage: false });
+    // Capture full-page screenshot as buffer
+    const screenshotBuffer = await page.screenshot({ 
+      fullPage: true, // Captures entire page, including scrolled content
+      encoding: 'binary',
+      type: 'jpeg', // JPEG for smaller size vs PNG
+      quality: 80, // 80% quality to reduce file size (0-100)
+    });
 
-    // Upload buffer to Cloudinary
+    // Upload buffer to Cloudinary with compression
     const uploadResult = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
-        { resource_type: 'image', folder: 'screenshots' },
+        { 
+          resource_type: 'image', 
+          folder: 'screenshots',
+          format: 'jpg', // Ensure Cloudinary saves as JPEG
+          quality: 80, // Match screenshot quality
+        },
         (error, result) => {
           if (error) reject(error);
           else resolve(result);
@@ -72,7 +85,7 @@ export default async function handler(req, res) {
     await browser.close();
 
     return res.status(200).json({
-      message: 'Screenshot captured and uploaded',
+      message: 'Full-page screenshot captured and uploaded',
       url: uploadResult.secure_url,
       timestamp: new Date().toISOString(),
     });
