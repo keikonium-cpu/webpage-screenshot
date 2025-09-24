@@ -45,7 +45,7 @@ export default async function handler(req, res) {
 
     browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 720 }); // Reasonable size for speed
+    await page.setViewport({ width: 1280, height: 720 }); // Reasonable size for speeds
 
     // Navigate with user-agent to avoid bot detection
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0.0.0');
