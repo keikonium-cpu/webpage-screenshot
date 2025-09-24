@@ -45,7 +45,7 @@ export default async function handler(req, res) {
 
     browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 720 }); // Smaller for speed
+    await page.setViewport({ width: 1600, height: 3200 }); // Smaller for speed
     const url = process.env.TARGET_URL;
 
     // Navigate with shorter timeout
