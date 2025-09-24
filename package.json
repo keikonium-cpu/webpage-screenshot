@@ -1,0 +1,12 @@
+{
+  "name": "webpage-screenshot",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "puppeteer": "^23.5.3",
+    "cloudinary": "^2.5.0"
+  }
+}
