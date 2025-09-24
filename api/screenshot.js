@@ -3,7 +3,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import fs from 'fs/promises';
 import path from 'path';
 
-// Cloudinary config (from env vars)
+// Ensure Cloudinary config
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -16,40 +16,70 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Launch browser (Vercel-friendly args)
+    // Validate env vars
+    if (!process.env.TARGET_URL) {
+      throw new Error('TARGET_URL environment variable is missing');
+    }
+    if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+      throw new Error('Cloudinary credentials are missing or incomplete');
+    }
+
+    // Launch browser with Vercel-optimized args
     const browser = await puppeteer.launch({
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--single-process', // Reduce memory for Vercel
+      ],
+      timeout: 5000, // 5s to launch browser
     });
-    const page = await browser.newPage();
-    const url = process.env.TARGET_URL || 'https://www.ebay.com/sch/i.html?_nkw=ALKALINE+TRIO&_sacat=0&LH_Complete=1'; // Customize via env
-    await page.setViewport({ width: 1920, height: 1080 });
-    await page.goto(url, { waitUntil: 'networkidle2' });
 
-    // Temp screenshot path
-    const tempPath = path.join('/tmp', `screenshot-${Date.now()}.png`);
-    await page.screenshot({ path: tempPath, fullPage: true });
+    try {
+      const page = await browser.newPage();
+      await page.setViewport({ width: 1280, height: 720 }); // Smaller for speed
+      const url = process.env.TARGET_URL;
 
-    // Upload to Cloudinary
-    const uploadResult = await new Promise((resolve, reject) => {
-      cloudinary.uploader.upload(tempPath, { resource_type: 'image' }, (error, result) => {
-        if (error) reject(error);
-        else resolve(result);
+      // Navigate with shorter timeout
+      await page.goto(url, {
+        waitUntil: 'domcontentloaded', // Faster than networkidle2
+        timeout: 5000, // 5s max
       });
-    });
 
-    // Cleanup temp file
-    await fs.unlink(tempPath);
+      // Generate temp file path
+      const tempPath = path.join('/tmp', `screenshot-${Date.now()}.png`);
+      await page.screenshot({ path: tempPath, fullPage: false }); // Partial page for speed
 
-    await browser.close();
+      // Upload to Cloudinary
+      const uploadResult = await new Promise((resolve, reject) => {
+        cloudinary.uploader.upload(
+          tempPath,
+          { resource_type: 'image', folder: 'screenshots' },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          }
+        );
+      });
 
-    res.status(200).json({
-      message: 'Screenshot captured and uploaded',
-      url: uploadResult.secure_url,
-      timestamp: new Date().toISOString(),
-    });
+      // Clean up temp file
+      await fs.unlink(tempPath).catch(err => console.warn('Temp file cleanup failed:', err));
+
+      await browser.close();
+
+      return res.status(200).json({
+        message: 'Screenshot captured and uploaded',
+        url: uploadResult.secure_url,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (innerError) {
+      await browser.close();
+      throw innerError; // Ensure browser closes on error
+    }
   } catch (error) {
-    console.error('Screenshot error:', error);
-    res.status(500).json({ error: 'Failed to capture screenshot' });
+    console.error('Screenshot error:', error.message, error.stack);
+    return res.status(500).json({ error: 'Failed to capture screenshot', details: error.message });
   }
 }
