@@ -92,20 +92,28 @@ export default async function handler(req, res) {
     // Reset scroll to top
     await page.evaluate(() => window.scrollTo(0, 0));
 
-    // Capture 5 viewport heights (1280x3600)
+    // Capture 5 viewport heights (1280x3600) as WebP
     const screenshotBuffer = await page.screenshot({
       clip: { x: 0, y: 0, width: 1280, height: 3600 },
-      type: 'webp', // Switch to WebP for smaller size
+      type: 'webp', // Explicit WebP
       quality: 80,
     });
 
-    // Upload to Cloudinary
+    // Upload to Cloudinary as WebP
     const uploadResult = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
-        { resource_type: 'image', folder: 'screenshots', format: 'webp', quality: 80 },
+        { 
+          resource_type: 'image', 
+          folder: 'screenshots', 
+          format: 'webp', // Force WebP
+          quality: 80 
+        },
         (error, result) => {
           if (error) reject(error);
-          else resolve(result);
+          else {
+            console.log(`Uploaded image format: ${result.format}`); // Debug format
+            resolve(result);
+          }
         }
       );
       uploadStream.end(screenshotBuffer);
@@ -118,6 +126,7 @@ export default async function handler(req, res) {
       url: uploadResult.secure_url,
       timestamp: new Date().toISOString(),
       pageHeight: pageHeight,
+      imageFormat: uploadResult.format // Debug format
     });
   } catch (error) {
     console.error('Screenshot error:', error.message, error.stack);
